@@ -57,3 +57,4 @@ google-cloud-sdk/
 
 # Credentials
 auth_input.txt
+api_key.txt

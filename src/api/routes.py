@@ -1,66 +1,20 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header, Query
 from fastapi.responses import HTMLResponse
-from typing import List, Optional
+from typing import Optional
 import logging
-import os
 
-logging.basicConfig(level=logging.INFO)
+from ..core.security import verify_api_key
+from ..core.config import settings
+from ..websocket.manager import manager
+
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="WebSocket Server")
-
-# API Key from environment variable
-API_KEY = os.environ.get("API_KEY", "your-default-api-key-change-this")
-
-def verify_api_key(x_api_key: Optional[str] = Header(None)):
-    """Verify API key from header"""
-    if x_api_key is None or x_api_key != API_KEY:
-        logger.warning(f"Invalid API key attempt: {x_api_key}")
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return x_api_key
+router = APIRouter()
 
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"Client connected. Total connections: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        try:
-            self.active_connections.remove(websocket)
-            logger.info(f"Client disconnected. Total connections: {len(self.active_connections)}")
-        except ValueError:
-            logger.warning("Client was already disconnected")
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        dead_connections = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting to client: {e}")
-                dead_connections.append(connection)
-
-        # Clean up dead connections
-        for connection in dead_connections:
-            try:
-                self.active_connections.remove(connection)
-            except ValueError:
-                pass
-
-
-manager = ConnectionManager()
-
-
-@app.get("/")
+@router.get("/")
 async def get(api_key: str = Header(None, alias="X-API-Key")):
+    """Root endpoint with API information"""
     verify_api_key(api_key)
     return {
         "message": "WebSocket Server is running",
@@ -69,18 +23,20 @@ async def get(api_key: str = Header(None, alias="X-API-Key")):
     }
 
 
-@app.get("/health")
+@router.get("/health")
 async def health_check():
+    """Health check endpoint"""
     return {
         "status": "healthy",
         "active_connections": len(manager.active_connections)
     }
 
 
-@app.websocket("/ws/{client_id}")
+@router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str, api_key: Optional[str] = Query(None)):
+    """WebSocket endpoint for real-time communication"""
     # Verify API key before accepting WebSocket connection
-    if api_key != API_KEY:
+    if api_key != settings.API_KEY:
         logger.warning(f"WebSocket connection rejected: invalid API key from {client_id}")
         await websocket.close(code=1008, reason="Invalid API key")
         return
@@ -94,8 +50,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, api_key: Opti
             logger.info(f"Received from {client_id}: {data}")
 
             # Validate message length
-            if len(data) > 1000:
-                await manager.send_personal_message("Error: Message too long (max 1000 chars)", websocket)
+            if len(data) > settings.MAX_MESSAGE_LENGTH:
+                await manager.send_personal_message(
+                    f"Error: Message too long (max {settings.MAX_MESSAGE_LENGTH} chars)",
+                    websocket
+                )
                 continue
 
             await manager.send_personal_message(f"You sent: {data}", websocket)
@@ -109,8 +68,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, api_key: Opti
         manager.disconnect(websocket)
 
 
-@app.get("/test")
+@router.get("/test")
 async def test_page():
+    """Test page for WebSocket client"""
     html = """
     <!DOCTYPE html>
     <html>
@@ -213,9 +173,3 @@ async def test_page():
     </html>
     """
     return HTMLResponse(content=html)
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)

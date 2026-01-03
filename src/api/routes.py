@@ -1,13 +1,17 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header, Query
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header, Query, Request
+from fastapi.templating import Jinja2Templates
 from typing import Optional
 import logging
+from pathlib import Path
 
 from ..core.security import verify_api_key
 from ..core.config import settings
 from ..websocket.manager import manager
 
 logger = logging.getLogger(__name__)
+
+# Setup templates
+templates = Jinja2Templates(directory=str(Path(__file__).parent.parent.parent / "templates"))
 
 router = APIRouter()
 
@@ -69,107 +73,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, api_key: Opti
 
 
 @router.get("/test")
-async def test_page():
+async def test_page(request: Request):
     """Test page for WebSocket client"""
-    html = """
-    <!DOCTYPE html>
-    <html>
-        <head>
-            <title>WebSocket Test</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                input { padding: 8px; margin: 5px; }
-                button { padding: 8px 15px; margin: 5px; cursor: pointer; }
-                .error { color: red; }
-                .success { color: green; }
-                #messages { list-style: none; padding: 0; }
-                #messages li { padding: 5px; margin: 5px 0; background: #f0f0f0; }
-            </style>
-        </head>
-        <body>
-            <h1>WebSocket Test Client (API Key Required)</h1>
-            <form action="" onsubmit="sendMessage(event)">
-                <div>
-                    <input type="text" id="apiKey" placeholder="API Key" style="width: 300px;" />
-                </div>
-                <div>
-                    <input type="text" id="clientId" placeholder="Client ID" value="user123" />
-                    <button type="button" onclick="connect()">Connect</button>
-                    <button type="button" onclick="disconnect()">Disconnect</button>
-                </div>
-                <hr>
-                <input type="text" id="messageText" autocomplete="off" placeholder="Type message..." style="width: 400px;"/>
-                <button>Send</button>
-            </form>
-            <ul id='messages'></ul>
-            <script>
-                var ws = null;
-
-                function connect() {
-                    const clientId = document.getElementById("clientId").value;
-                    const apiKey = document.getElementById("apiKey").value;
-
-                    if (!apiKey) {
-                        addMessage('Please enter API key', 'error');
-                        return;
-                    }
-
-                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const wsUrl = `${protocol}//${window.location.host}/ws/${clientId}?api_key=${encodeURIComponent(apiKey)}`;
-
-                    ws = new WebSocket(wsUrl);
-
-                    ws.onmessage = function(event) {
-                        addMessage(event.data);
-                    };
-
-                    ws.onopen = function() {
-                        addMessage('Connected!', 'success');
-                    };
-
-                    ws.onclose = function(event) {
-                        if (event.code === 1008) {
-                            addMessage('Disconnected: Invalid API key', 'error');
-                        } else {
-                            addMessage('Disconnected!', 'error');
-                        }
-                    };
-
-                    ws.onerror = function(error) {
-                        addMessage('Connection error', 'error');
-                    };
-                }
-
-                function addMessage(text, className) {
-                    var messages = document.getElementById('messages');
-                    var message = document.createElement('li');
-                    message.appendChild(document.createTextNode(text));
-                    if (className) {
-                        message.className = className;
-                    }
-                    messages.appendChild(message);
-                    messages.scrollTop = messages.scrollHeight;
-                }
-
-                function disconnect() {
-                    if (ws) {
-                        ws.close();
-                        ws = null;
-                    }
-                }
-
-                function sendMessage(event) {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        var input = document.getElementById("messageText");
-                        ws.send(input.value);
-                        input.value = '';
-                    } else {
-                        alert('Please connect first!');
-                    }
-                    event.preventDefault();
-                }
-            </script>
-        </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
+    return templates.TemplateResponse("test.html", {"request": request})
